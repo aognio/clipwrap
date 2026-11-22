@@ -1,0 +1,39 @@
+# clipwrapd example configuration
+#
+# Copy this file to clipwrap-server.toml and adjust settings for your environment.
+# Set an administrator password before starting the daemon:
+#
+#   clipwrapd --set-admin-password --config clipwrap-server.toml
+
+[server]
+listen = "127.0.0.1:8765"
+public_url = "https://clipboard.example.com"
+read_timeout = "10s"
+write_timeout = "10s"
+idle_timeout = "60s"
+
+[ingest]
+socket = "/run/clipwrapd/clipwrapd.sock"
+max_item_bytes = 1048576
+max_connections = 64
+
+[history]
+capacity = 500
+
+[web]
+enabled = true
+session_ttl = "12h"
+
+[auth]
+username = "admin"
+password_hash = ""
+
+[websocket]
+ping_interval = "30s"
+pong_timeout = "60s"
+max_clients = 32
+replay_limit = 500
+
+[logging]
+level = "info"
+format = "text"
