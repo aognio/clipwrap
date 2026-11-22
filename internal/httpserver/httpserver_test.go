@@ -241,7 +241,7 @@ func TestDashboardWhenAuthenticated(t *testing.T) {
 	mux.ServeHTTP(resp, req)
 
 	if resp.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", resp.Code)
+		t.Errorf("expected 200, got %d body: %s", resp.Code, resp.Body.String())
 	}
 }
 

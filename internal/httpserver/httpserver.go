@@ -3,9 +3,12 @@ package httpserver
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -18,27 +21,48 @@ import (
 	"github.com/clipwrap/clipwrapd/internal/history"
 )
 
+//go:embed assets/templates/*.html
+var templateFS embed.FS
+
+//go:embed assets/static/*
+var staticFS embed.FS
+
 // Server wraps the HTTP server with its dependencies.
 type Server struct {
-	cfg       config.Config
-	store     *history.Store
-	broker    *broker.Broker
+	cfg          config.Config
+	store        *history.Store
+	broker       *broker.Broker
 	sessionStore *auth.SessionStore
 	rateLimiter  *auth.RateLimiter
-	upgraded   int64
-	mu        sync.Mutex
-	startedAt time.Time
-	listener  *http.Server
+	templates    *template.Template
+	mu           sync.Mutex
+	startedAt    time.Time
+	listener     *http.Server
 }
 
 // NewServer creates a new HTTP server.
 func NewServer(cfg config.Config, store *history.Store, b *broker.Broker) *Server {
+	tmpl := template.New("").Funcs(template.FuncMap{
+		"truncate": func(s string, n int) string {
+			if len(s) > n {
+				return s[:n] + "…"
+			}
+			return s
+		},
+	})
+	tmpl, err := tmpl.ParseFS(templateFS, "assets/templates/*.html")
+	if err != nil {
+		// Fallback: templates are optional for API-only usage
+		tmpl = template.New("")
+	}
+
 	return &Server{
 		cfg:          cfg,
 		store:        store,
 		broker:       b,
 		sessionStore: auth.NewSessionStore(cfg.Web.SessionTTL),
 		rateLimiter:  auth.NewRateLimiter(1*time.Minute, 10),
+		templates:    tmpl,
 		startedAt:    time.Now(),
 	}
 }
@@ -61,6 +85,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // RegisterRoutes registers all HTTP handlers on the given mux.
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
+	// Static files
+	mux.Handle("/static/", http.FileServer(http.FS(staticFS)))
+
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/readyz", s.handleReadyz)
 	mux.HandleFunc("/login", s.handleLogin)
@@ -96,8 +123,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Render login form (placeholder — dashboard templates will handle this)
-	http.Error(w, "login form", http.StatusOK)
+	// Render login form
+	if err := s.templates.ExecuteTemplate(w, "login.html", map[string]interface{}{}); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) doLogin(w http.ResponseWriter, r *http.Request) {
@@ -182,9 +211,63 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Placeholder — will be replaced with template rendering in Stage 6
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, "<html><body>Dashboard</body></html>")
+	s.mu.Lock()
+	uptime := time.Since(s.startedAt)
+	s.mu.Unlock()
+
+	// Build event list for display
+	allEvents := s.store.AllEvents()
+	type EventRow struct {
+		ID          string
+		Timestamp   string
+		Session     string
+		Preview     string
+		EncodedText string
+	}
+	rows := make([]EventRow, 0, len(allEvents))
+	for i := len(allEvents) - 1; i >= 0; i-- {
+		ev := allEvents[i]
+		preview := ev.Text
+		if len(preview) > 100 {
+			preview = preview[:100] + "…"
+		}
+		rows = append(rows, EventRow{
+			ID:          string(ev.ID),
+			Timestamp:   ev.Timestamp.Local().Format("15:04:05"),
+			Session:     ev.Session,
+			Preview:     preview,
+			EncodedText: url.QueryEscape(ev.Text),
+		})
+	}
+
+	latestTime := "—"
+	if ev, ok := s.store.Latest(); ok {
+		latestTime = ev.Timestamp.Local().Format("15:04:05")
+	}
+
+	data := map[string]interface{}{
+		"InstanceID": string(s.store.InstanceID()),
+		"EventCount": s.store.Count(),
+		"WSClients":  s.broker.Count(),
+		"Uptime":     truncateDuration(uptime),
+		"TotalEvents": int(s.store.Sequence()),
+		"LatestEvent": latestTime,
+		"Events":      rows,
+	}
+
+	if err := s.templates.ExecuteTemplate(w, "dashboard.html", data); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+func truncateDuration(d time.Duration) string {
+	if d.Hours() >= 1 {
+		return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
+	}
+	if d.Minutes() >= 1 {
+		return fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%ds", int(d.Seconds()))
 }
 
 // handleStatus returns operational metrics.

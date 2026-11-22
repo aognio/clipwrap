@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Clipwrapd — Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>Clipwrapd</h1>
+        <div class="status-bar">
+            <span id="instance-id">{{.InstanceID}}</span>
+            <span id="event-count">{{.EventCount}} events</span>
+            <span id="ws-clients">{{.WSClients}} clients</span>
+            <form method="post" action="/logout" class="logout-form">
+                <button type="submit">Logout</button>
+            </form>
+        </div>
+    </header>
+    <main>
+        <section class="stats">
+            <div class="stat">
+                <span class="label">Uptime</span>
+                <span id="uptime">{{.Uptime}}</span>
+            </div>
+            <div class="stat">
+                <span class="label">Total Events</span>
+                <span id="total-events">{{.TotalEvents}}</span>
+            </div>
+            <div class="stat">
+                <span class="label">Latest Event</span>
+                <span id="latest-event">{{.LatestEvent}}</span>
+            </div>
+        </section>
+        <section class="events">
+            <h2>Clipboard History</h2>
+            <div id="event-list">
+                {{range .Events}}
+                <div class="event-item">
+                    <div class="event-meta">
+                        <span class="event-time">{{.Timestamp}}</span>
+                        <span class="event-session">{{.Session}}</span>
+                        <span class="event-id">{{.ID}}</span>
+                    </div>
+                    <div class="event-text" title="{{.Preview}}">
+                        {{.Preview}}
+                    </div>
+                    <div class="event-actions">
+                        <button class="btn-copy" data-text="{{.EncodedText}}">Copy</button>
+                    </div>
+                </div>
+                {{else}}
+                <p class="no-events">No clipboard events yet.</p>
+                {{end}}
+            </div>
+        </section>
+    </main>
+    <script>
+        // Copy to clipboard
+        document.querySelectorAll('.btn-copy').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var text = decodeURIComponent(this.getAttribute('data-text'));
+                navigator.clipboard.writeText(text).then(function() {
+                    btn.textContent = 'Copied!';
+                    setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
+                });
+            });
+        });
+
+        // Real-time updates via WebSocket
+        (function() {
+            var wsUrl = 'ws://' + location.host + '/api/v1/events/ws';
+            var ws = new WebSocket(wsUrl);
+            
+            ws.onmessage = function(e) {
+                var data;
+                try {
+                    data = JSON.parse(e.data);
+                } catch(err) {
+                    return;
+                }
+                
+                // Skip control messages
+                if (data.type === 'replay_gap' || data.type === 'instance_gap') {
+                    return;
+                }
+                
+                // Add new event to the list
+                var list = document.getElementById('event-list');
+                var noEvents = list.querySelector('.no-events');
+                if (noEvents) {
+                    noEvents.remove();
+                }
+                
+                var item = document.createElement('div');
+                item.className = 'event-item';
+                var time = new Date(data.timestamp).toLocaleTimeString();
+                var preview = escapeHtml(data.text);
+                if (preview.length > 100) {
+                    preview = preview.substring(0, 100) + '…';
+                }
+                var encoded = encodeURIComponent(data.text);
+                item.innerHTML = 
+                    '<div class="event-meta">' +
+                        '<span class="event-time">' + time + '</span>' +
+                        '<span class="event-session">' + escapeHtml(data.session) + '</span>' +
+                        '<span class="event-id">' + escapeHtml(data.id) + '</span>' +
+                    '</div>' +
+                    '<div class="event-text" title="' + preview + '">' + preview + '</div>' +
+                    '<div class="event-actions">' +
+                        '<button class="btn-copy" data-text="' + encoded + '">Copy</button>' +
+                    '</div>';
+                
+                // Add copy handler
+                var copyBtn = item.querySelector('.btn-copy');
+                copyBtn.addEventListener('click', function() {
+                    var text = decodeURIComponent(this.getAttribute('data-text'));
+                    navigator.clipboard.writeText(text).then(function() {
+                        this.textContent = 'Copied!';
+                        var self = this;
+                        setTimeout(function() { self.textContent = 'Copy'; }, 1500);
+                    });
+                });
+                
+                list.insertBefore(item, list.firstChild);
+                
+                // Update count
+                var count = document.getElementById('event-count');
+                if (count) {
+                    var num = parseInt(count.textContent) + 1;
+                    count.textContent = num + ' events';
+                }
+            };
+            
+            ws.onclose = function() {
+                // Reconnect after 3 seconds
+                setTimeout(arguments.callee, 3000);
+            };
+        })();
+        
+        function escapeHtml(text) {
+            var div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
