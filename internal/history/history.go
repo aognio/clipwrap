@@ -92,6 +92,13 @@ func (s *Store) Sequence() domain.Sequence {
 	return s.seq
 }
 
+// InstanceID returns the daemon instance ID for this store.
+func (s *Store) InstanceID() domain.InstanceID {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.instance
+}
+
 // ReplayResult contains the events returned by Since, along with gap information.
 type ReplayResult struct {
 	Events      []domain.ClipboardEvent
