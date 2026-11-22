@@ -1,0 +1,43 @@
+[Unit]
+Description=Clipwrapd Clipboard Capture Daemon
+Documentation=https://github.com/clipwrap/clipwrapd
+After=network.target
+
+[Service]
+Type=simple
+User=clipwrapd
+Group=clipwrapd
+RuntimeDirectory=clipwrapd
+ConfigurationDirectory=clipwrapd
+ConfigFileMode=0600
+
+ExecStart=/usr/local/bin/clipwrapd --config /etc/clipwrapd/clipwrap-server.toml
+Restart=on-failure
+RestartSec=5s
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/run/clipwrapd
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=clipwrapd
+
+# Graceful shutdown
+TimeoutStopSec=15s
+KillMode=mixed
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

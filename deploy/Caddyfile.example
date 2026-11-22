@@ -1,0 +1,30 @@
+# Caddy configuration for clipwrapd
+#
+# This example assumes Caddy terminates TLS and proxies to clipwrapd
+# running on localhost:8765.
+
+clipboard.example.com {
+    # TLS is handled by Caddy automatically with ACME/Let's Encrypt
+    # Uncomment and modify if you have your own certificate:
+    # tls /etc/ssl/certs/clipboard.crt /etc/ssl/private/clipboard.key
+
+    # Security headers
+    header {
+        -Server
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "0"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Proxy to clipwrapd
+    reverse_proxy 127.0.0.1:8765 {
+        # WebSocket support
+        header_up Upgrade {upstream.Upgrade}
+        header_up Connection {upstream.Connection}
+    }
+
+    # Rate limiting (optional)
+    # @login method POST && path /login
+    # rate_limit @login 5 1m
+}
